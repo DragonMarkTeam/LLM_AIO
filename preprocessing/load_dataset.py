@@ -79,6 +79,8 @@ def load_data(path, cache_dir, splits):
     data = pd.json_normalize(ds)
     if multichoices == True:
         data["label"] = data.apply(lambda x: find_true_label(x), axis=1)
+    if "extra_input" not in data.columns:
+        data["extra_input"] = " "
     data.drop(drop_columns, axis='columns', inplace=True)
     data.rename(columns=dict, inplace=True)
     df = Dataset.from_pandas(data)

@@ -19,38 +19,6 @@ def select_column(tokenized_datasets, remove_columns, columns, rename_column):
     return tokenized_datasets
 
 def get_dataset(opt, dataset, split):
-    if dataset == "vllms-leaderboard":
-        raw_datasets = load_dataset(path='vlsp-2023-vllm/vllms-leaderboard') # Bộ này chưa biết cấu trúc
-        # remove_columns=
-        # columns=
-        # rename_column=
-    elif dataset == "grade_12_exams":
-        raw_datasets = load_dataset(path='vlsp-2023-vllm/grade_12_exams')
-        remove_columns=["id","metadata"]
-        columns=["question","choices","answerKey"]
-        rename_column=["input","extra_input","label"]
-    elif dataset == "lambada_vi":
-        raw_datasets = load_dataset(path='vlsp-2023-vllm/lambada_vi')
-        remove_columns=["text","metadata"]
-        columns=["context","target_word"]
-        rename_column=["input","label"]
-    elif dataset == "ai2_arc_vi":
-        raw_datasets = load_dataset(path='vlsp-2023-vllm/ai2_arc_vi') # choices có cả label và text, đang tìm cách xử lý
-        # raw_datasets["input"] = datasets["input"]
-        # raw_datasets["choices"] = datasets["choices"]
-        # raw_datasets["label"] = datasets["labels"]
-    elif dataset == "hhh_alignment":
-        datasets = load_dataset(path='vlsp-2023-vllm/hhh_alignment') # choices có cả label và text, đang tìm cách xử lý
-        # raw_datasets["input"] = datasets["input"]
-        # raw_datasets["choices"] = datasets["choices"]
-        # raw_datasets["label"] = datasets["labels"]
-    elif dataset == "truthful_qa":
-        datasets = load_dataset(path='vlsp-2023-vllm/truthful_qa') # mc1 và mc2 có cả label và text, đang tìm cách xử lý
-        # raw_datasets["input"] = datasets["input"]
-        # raw_datasets["choices"] = datasets["choices"]
-        # raw_datasets["label"] = datasets["labels"]
-        
-        
         
     tokenizer = AutoTokenizer.from_pretrained(opt.pretrain_tokenizer)
 
