@@ -7,13 +7,14 @@ from datasets import load_dataset
 login()
 
 
+
 def find_true_label(x):
   text = x["choices.text"]
   for i in range(len(text)):
     if x["answerKey"]	== x["choices.label"][i]:
       return text[i]
 
-def load_data(path, cache_dir, splits):
+def load_data(path, save_path, cache_dir, splits):
     print(splits)
     multichoices = False
     if path == "uonlp/CulturaX":
@@ -75,16 +76,19 @@ def load_data(path, cache_dir, splits):
                 "choices.text": "extra_input"}
         multichoices=True
 
-        
+
     data = pd.json_normalize(ds)
+    print(data.columns)
     if multichoices == True:
         data["label"] = data.apply(lambda x: find_true_label(x), axis=1)
-    if "extra_input" not in data.columns:
-        data["extra_input"] = " "
+    print(data.columns)
     data.drop(drop_columns, axis='columns', inplace=True)
+    print(data.columns)
     data.rename(columns=dict, inplace=True)
+    print(data.columns)
     df = Dataset.from_pandas(data)
-    
+
     dataset = DatasetDict()
     dataset[splits] = df
+    dataset.save_to_disk(save_path)
     return dataset
