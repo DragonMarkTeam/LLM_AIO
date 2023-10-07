@@ -5,6 +5,8 @@ from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 import copy
+import json
+import datetime
 
 from ..dataloader.dataloader import CustomDataset
 
@@ -59,20 +61,16 @@ class Trainer(nn.Module):
         
         
         # Dataset state
-        # Xác nhận là dataset này đã được load để train
-        self.is_training = True
-        # Xác nhận là model này chưa train xong dataset này.
-        self.trained = False
         # Xác nhận thời gian gần nhất mà dataset được load
-        self.time_load = get_time_now()
-        # Xác nhận là dataset này không bị break trước đây
-        self.is_break = False
+        self.time_load = self.get_time_now()
         
         # Model state
+        # Trọng số mô hình tốt nhất
+        self.best_weights = None
         # Xác nhận độ chính xác tốt nhất của mô hình
         self.best_accuracy = -1
         # Xác nhận giá trị loss tương ứng
-        self.correspond_loss = 1000000
+        self.best_vloss = 1000000
         # Xác nhận epoch mà mô hình đạt đô chính xác tốt nhất
         self.correspond_epoch = 0
         # Xác nhận mốc thời gain mà mô hình đạt đô chính xác tốt nhất
@@ -80,9 +78,6 @@ class Trainer(nn.Module):
         
         # Trường hợp bị break giữa chừng
         self.cur_epoch = 0
-        
-        
-        
     
         # Save path
         self.checkpoint_path = checkpoint_path
@@ -126,17 +121,20 @@ class Trainer(nn.Module):
         
     def check_break(self, is_training, trained, time_load):
         if is_training == True and trained == False:
-            if time_load - get_time_now() > self.limit_time_train:
+            if time_load - self.get_time_now() > self.limit_time_train:
                 print("Training process was break.")
                 return True
         return False
             
     def check_being_trained(self, is_training, trained, time_load):
         if is_training == True and trained == False:
-            if time_load - get_time_now() < self.limit_time_train:
+            if time_load - self.get_time_now() < self.limit_time_train:
                 print("Another account is training this dataset.")
                 return True
         return False
+    
+    def get_time_now(self):
+        return datetime.datetime.now()
     def train(self):
         # ======================================================================
         # Step by step training
@@ -148,7 +146,7 @@ class Trainer(nn.Module):
         # 3 - Lưu kết quả
         # 3.1 - Mở file lưu mô hình cũ. Nếu có cải tiến về độ chính xác thì lưu lại.
         # 3.2 - Mở file lưu trạng thái dataset. Nếu có cải tiến thì lưu các giá trị lại. Chú ý, với từng mô hình thì sẽ có file trạng thái riêng cho từng dataset.
-        is_training, trained, time_load, break_correspond_model, break_correspond_optimizer, break_best_accuracy, break_correspond_loss, break_correspond_epoch, break_correspond_timestamp = 
+        is_training, trained, time_load, break_correspond_model, break_correspond_optimizer, break_best_accuracy, break_correspond_loss, break_correspond_epoch, break_correspond_timestamp = self.load_state_dataset()
         if self.check_being_trained(is_training, trained, time_load)==False:
             return False
         else:
@@ -164,7 +162,7 @@ class Trainer(nn.Module):
         # Define your scaler for loss scaling
         scaler = GradScaler()
     
-        for epoch in range(self.cur_epoch, self.num_epochs, 1):
+        for epoch in range(self.correspond_epoch, self.num_epochs, 1):
             # Training
             # Make sure gradient tracking is on, and do a pass over the data
             self.model.train(True)
@@ -181,12 +179,10 @@ class Trainer(nn.Module):
             if avg_vloss < self.best_vloss:
                 self.best_vloss = avg_vloss
                 self.best_weights = copy.deepcopy(self.model.state_dict())
-                self.save_checkpoint(PATH=self.save_checkpoint, EPOCH=epoch, model=self.model, optimizer=self.optimizer, LOSS=avg_vloss)
-                # model_path = self.save_path+'model_{}_{}'.format(timestamp, epoch)
-                # torch.save(self.model.state_dict(), model_path)
+                self.save_checkpoint(epoch=epoch)
                 
             if not torch.cuda.is_available():
-                self.save_checkpoint(PATH=self.save_checkpoint, EPOCH=epoch, model=self.model, optimizer=self.optimizer, LOSS=avg_vloss)
+                self.save_checkpoint(epoch=epoch)
         
         # restore model and return best accuracy
         self.model.load_state_dict(self.best_weights)
@@ -229,32 +225,72 @@ class Trainer(nn.Module):
             return avg_vloss
         
     def load_model(self):
-        
-    def save_checkpoint(self):
+        # Opening JSON file
+        with open(self.model_path, 'r') as openfile:
+            # Reading from json file
+            json_object = json.load(openfile)
+            return json_object["model"], json_object["optimizer"], json_object["best_accuracy"], json_object["correspond_loss"], json_object["correspond_epoch"], json_object["correspond_dataset"], json_object["correspond_timestamp"]
     
+    def save_checkpoint(self, epoch):
+        # Data to be written
+        dictionary = {
+            "model": self.model.__class__.__name__ ,
+            "accuracy": self.best_accuracy,
+            "loss": self.best_vloss,
+            "epoch": epoch,
+            "timestamp": self.get_time_now()
+        }
+        # Serializing json
+        json_object = json.dumps(dictionary, indent=4)
+        
+        # Writing to sample.json
+        with open(self.checkpoint_path + "_" +str(self.model.__class__.__name__) + "_" + str(self.get_time_now()) + "_" + str(self.cur_epoch) + ".json", "w") as outfile:
+            outfile.write(json_object)
+            
     def save_model(self):
         # Đầu tiên là load lên cái thông số cũ.
         old_model, old_optimizer, old_best_accuracy, old_correspond_loss, old_correspond_epoch, old_correspond_dataset, old_correspond_timestamp = self.load_model()
         # Kiểm tra nếu độ chính xác của mô hình cải thiện thì mới lưu lại
         if old_best_accuracy < self.best_accuracy:
+            dictionary = {
+            "model": self.model.__class__.__name__ ,
+            "optimizer": self.optimizer,
+            "accuracy": self.best_accuracy,
+            "loss": self.best_vloss,
+            "epoch": self.correspond_epoch,
+            "dataset": self.valid_dataset_path,
+            "timestamp": self.get_time_now()
+            }
+            # Serializing json
+            json_object = json.dumps(dictionary, indent=4)
             
+            # Writing to sample.json
+            with open(self.model_path, "w") as outfile:
+                outfile.write(json_object)
+                
     def load_state_dataset(self):
-        is_training, trained, time_load, break_correspond_model, break_correspond_optimizer, break_best_accuracy, break_correspond_loss, break_correspond_epoch, break_correspond_timestamp = 
-        is_break = self.check_break(self, is_training, trained, time_load)
-        
+        is_training, trained, time_load, break_correspond_model, break_correspond_optimizer, break_best_accuracy, break_best_vloss, break_correspond_epoch, break_correspond_timestamp = self.load_state_dataset()
         # ========================================================================
         # Có một cái hàm assert, nhưng mà quên cú pháp rồi
         # ========================================================================
-        
-        if is_break==True:
-            self.cur_epoch = break_correspond_epoch
-            self.model = break_correspond_model
-            self.best_accuracy = break_best_accuracy
-            self.correspond_loss = break_correspond_loss
-            self.optimizer = break_correspond_optimizer
-            self.correspond_timestamp = break_correspond_timestamp
-            return True
-        else:
-            return False
-    def change_state_dataset(self):
-        
+
+        self.cur_epoch = break_correspond_epoch
+        self.model = break_correspond_model
+        self.best_accuracy = break_best_accuracy
+        self.best_vloss = break_best_vloss
+        self.optimizer = break_correspond_optimizer
+        self.correspond_timestamp = break_correspond_timestamp
+    def change_state_dataset(self, is_training, trained):
+        with open(self.model_path, 'r') as openfile:
+            # Reading from json file
+            json_object = json.load(openfile)
+            # Xác nhận là dataset này đã được load để train
+            json_object["is_training"] = is_training
+            # Xác nhận là model này chưa train xong dataset này.
+            json_object["trained"] = trained
+            # Xác nhận thời gian gần nhất mà dataset được load
+            json_object["timestamp"] = self.get_time_now()
+            
+        # Writing to sample.json
+        with open(self.model_path, "w") as outfile:
+            outfile.write(json_object)
