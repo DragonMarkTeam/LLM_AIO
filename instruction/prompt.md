@@ -1,4 +1,5 @@
 https://www.youtube.com/watch?v=L8l4mwVV2lY
+
 Chúng ta chú ý rằng, câu chúng ta đưa vào CHAT-GPT có thể vừa là input vừa là prompt.
 ![alt text](../image/explan_input_prompt_and_output.png)
 - "Classify this news article" chính là prompt của chúng ta.
