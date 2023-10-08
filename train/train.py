@@ -15,6 +15,7 @@ class Trainer(nn.Module):
                  model, 
                  optimizer, 
                  tokenizer, 
+                 prompt,
                  checkpoint_path, 
                  model_path, 
                  state_dataset_path, 
@@ -38,6 +39,7 @@ class Trainer(nn.Module):
         self.model = model
         self.optimizer = optimizer
         self.tokenizer = tokenizer
+        self.prompt = prompt
         self.num_epochs = num_epochs
         self.train_dataset = None
         self.valid_dataset = None
@@ -190,7 +192,7 @@ class Trainer(nn.Module):
     def training_step(self, scaler):
         for data in tqdm(self.train_dataset, desc=f'Epoch train {self.cur_epoch}/{self.num_epochs}', initial=0, dynamic_ncols=True):
             # Every data instance is an input + label pair
-            inputs, prompts, labels = data
+            input_ids, attention_mask, labels = data
                     
             inputs, prompts, labels = inputs.to(self.device), prompts.to(self.device), labels.to(self.device)
                     
