@@ -191,10 +191,8 @@ class Trainer(nn.Module):
         return self.best_vloss
     def training_step(self, scaler):
         for data in tqdm(self.train_dataset, desc=f'Epoch train {self.cur_epoch}/{self.num_epochs}', initial=0, dynamic_ncols=True):
-            # Every data instance is an input + label pair
-            input_ids, attention_mask, labels = data
-                    
-            inputs, prompts, labels = inputs.to(self.device), prompts.to(self.device), labels.to(self.device)
+            input_ids, attention_mask, token_type_ids, labels = data
+            input_ids, attention_mask, token_type_ids, labels = input_ids.to(self.device), attention_mask.to(self.device), token_type_ids.to(self.device), labels.to(self.device)
                     
             # Zero your gradients for every batch!
             self.optimizer.zero_grad(set_to_none=True)

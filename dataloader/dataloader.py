@@ -18,6 +18,8 @@ class CustomDataset(Dataset):
         else:
             self.have_prompt = True
             self.prompts = wiki[split][instruction_columns]
+            
+            
         self.labels = wiki[split][labels_columns]
     def __len__(self):
         return len(self.labels)
