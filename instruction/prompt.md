@@ -1,5 +1,6 @@
 https://www.youtube.com/watch?v=L8l4mwVV2lY
 
+# Overview
 Chúng ta chú ý rằng, câu chúng ta đưa vào CHAT-GPT có thể vừa là input vừa là prompt.
 ![alt text](../image/explan_input_prompt_and_output.png)
 - "Classify this news article" chính là prompt của chúng ta.
@@ -10,9 +11,11 @@ Chúng ta chú ý rằng, câu chúng ta đưa vào CHAT-GPT có thể vừa là
 - "{Sentence}" có thể là đường link đến bài báo nào đó. Đây là input của chúng ta.
 - "English" và "French" chính là các nhãn có thể có.
 <!-- Tổng kết -->
+# Summary
 - Prompt nên dễ hiểu và rõ ràng.
 - Prompt có thể cho chính chúng ta tạo ra mà không cần dựa trên trích xuất dữ liệu.
 <!-- One-shot -->
+# One-shot
 ![alt text](../image/explan_input_prompt_and_output_3.png)
 - Bao gồm:
     - Task: "Create a list of ten book ...".
@@ -20,6 +23,7 @@ Chúng ta chú ý rằng, câu chúng ta đưa vào CHAT-GPT có thể vừa là
     - Output: "ten books".
     - Context: Non
 <!-- Zero-shot -->
+# Zero-shot
 ![alt text](../image/explan_input_prompt_and_output_4.png)
 - Bao gồm:
     - Task: "Convert ... a table".
@@ -27,6 +31,7 @@ Chúng ta chú ý rằng, câu chúng ta đưa vào CHAT-GPT có thể vừa là
     - Output: "Column 1 ...".
     - Context: Non
 <!-- Role -->
+# Role
 ![alt text](../image/explan_input_prompt_and_output_5.png)
 ![alt text](../image/explan_input_prompt_and_output_5_1.png)
 - Bao gồm:
@@ -36,6 +41,7 @@ Chúng ta chú ý rằng, câu chúng ta đưa vào CHAT-GPT có thể vừa là
     - Context: Cả hai cái prompt được xem như là context của câu tương lai.
     - Role prompt: "curl ... greenhorne" và " rewrite the previous ... Vader".
 <!-- Few-shot -->
+# Few-shot
 Thường được sử dụng cho boojd ữ liệu lớn
 ![alt text](../image/explan_input_prompt_and_output_6.png)
 - Bao gồm:
@@ -44,6 +50,7 @@ Thường được sử dụng cho boojd ữ liệu lớn
     - Output: Green.
     - Context: Red.
 <!-- Chain -->
+# Chain
 ![alt text](../image/explan_input_prompt_and_output_7.png)
 - Bao gồm:
     - Task: Blue.
