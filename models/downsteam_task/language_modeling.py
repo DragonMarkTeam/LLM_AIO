@@ -2,9 +2,9 @@ import torch
 from torch import nn
 import collections
 
-class CausalLM(nn.Module):
+class CausalLMHead(nn.Module):
     def __init__(self, input_dim, num_labels):
-        super(CausalLM, self).__init__()
+        super(CausalLMHead, self).__init__()
         self.transform = torch.nn.Sequential(
             collections.OrderedDict(
                 [
