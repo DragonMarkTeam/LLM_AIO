@@ -19,3 +19,4 @@ class MaskedLanguageModeling(nn.Module):
     def forward(self, input):
         x = self.transform(input)
         return self.decoder(x)
+        
