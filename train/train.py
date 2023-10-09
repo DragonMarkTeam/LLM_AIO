@@ -1,296 +1,356 @@
+"""
+Training module. This file contains the Trainer class which used to train the model.
+"""
+
+import os
 import torch
 from torch import nn
-import os
+from torch.utils.data import Dataset
+from torch.optim import Optimizer, AdamW
 from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
-from torch.utils.data import DataLoader
-import copy
-import json
-import datetime
+from .callbacks import BaseCallback
+from ..utils.cast_device import cast_to_device
 
-from ..dataloader.dataloader import CustomDataset
 
-class Trainer(nn.Module):
-    def __init__(self, 
-                 model, 
-                 optimizer, 
-                 tokenizer, 
-                 prompt,
-                 checkpoint_path, 
-                 model_path, 
-                 state_dataset_path, 
-                 num_epochs, 
-                 train_dataset_path=None, 
-                 valid_dataset_path=None, 
-                 choosen_columns=None, 
-                 tan_suat_save_chechpoint=1, 
-                 batch_size=32, 
-                 shuffle=False, 
-                 num_workers=0, 
-                 collate_fn=None, 
-                 pin_memory=False, 
-                 drop_last=True, 
-                 timeout=0, 
-                 limit_time_train=10000000,
-                 pin_memory_device="", 
-                 device="cuda"):
-        super(Trainer, self).__init__()
-        self.device = device
+CHECKPOINT_EXTENSION = '.pt'
+
+
+class Trainer:
+    """
+    Trainer Wrapper modules. Every models will be called inside here.
+
+    Example:
+    >>> from train import Trainer
+    >>> from train.callbacks import EarlyStopping
+    >>> from models import GPT2
+
+    >>> model = GPT2()
+    >>> trainer = Trainer(model)
+    >>> trainer.fit(
+    >>>     train_generator,
+    >>>     valid_generator,
+    >>>     batch_size=256,
+    >>>     epochs=40,
+    >>>     checkpoint_directory='/checkpoints',
+    >>>     callbacks=[EarlyStopping()]
+    >>> )
+
+    Args:
+        train_generator (torch.utils.data.DataLoader): Training data generator.
+        valid_generator (torch.utils.data.DataLoader): Validation data generator.
+        model (torch.nn.Module): Model to be trained.
+        loss (torch.nn.Module): Loss function to be used.
+        optimizer (torch.optim.Optimizer): Optimizer to be used.
+        batch_size (int): Batch size.
+        epochs (int): Epochs.
+        checkpoint_directory (str): Directory to save model checkpoints.
+        callbacks (list): List of callbacks to be used.
+        time_limit (int): Limit time for training process. If None, it will be ignored.
+        device (str): Device to be used. Default: 'cuda' if available, otherwise 'cpu'.
+
+    Methods:
+        fit: Fit model with given data generator.
+        load_weights: Load model's weights from checkpoint.
+
+    Keyword Args:
+        learning_rate (float): Learning rate. Default: 1e-5.
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        loss=None,
+        optimizer: Optimizer = None,
+        time_limit: int = None,
+        **kwargs
+    ):
+        # --- Data inputs args ---
+        # The train_generator and valid_generator will be set in fit method
+        self.train_generator = None
+        self.valid_generator = None
+
+        # --- Model configs args ---
+        # The model variable will be set in fit method
         self.model = model
-        self.optimizer = optimizer
-        self.tokenizer = tokenizer
-        self.prompt = prompt
-        self.num_epochs = num_epochs
-        self.train_dataset = None
-        self.valid_dataset = None
-        self.tan_suat_save_chechpoint = tan_suat_save_chechpoint
-        self.choosen_columns = choosen_columns
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.num_workers = num_workers
-        self.collate_fn = collate_fn
-        self.pin_memory = pin_memory
-        self.drop_last = drop_last
-        self.timeout = timeout
-        self.pin_memory_device = pin_memory_device
-        
-        # Thời gian giới hạn cho việc train, nếu vượt qua mốc này, quá trình train được xem là đã bị break
-        self.limit_time_train = limit_time_train
-        
-        # Load dataset path
-        self.train_dataset_path = train_dataset_path
-        self.valid_dataset_path = valid_dataset_path
-        
-        
-        # Dataset state
-        # Xác nhận thời gian gần nhất mà dataset được load
-        self.time_load = self.get_time_now()
-        
-        # Model state
-        # Trọng số mô hình tốt nhất
-        self.best_weights = None
-        # Xác nhận độ chính xác tốt nhất của mô hình
-        self.best_accuracy = -1
-        # Xác nhận giá trị loss tương ứng
-        self.best_vloss = 1000000
-        # Xác nhận epoch mà mô hình đạt đô chính xác tốt nhất
-        self.correspond_epoch = 0
-        # Xác nhận mốc thời gain mà mô hình đạt đô chính xác tốt nhất
-        self.correspond_timestamp = self.time_load
-        
-        # Trường hợp bị break giữa chừng
-        self.cur_epoch = 0
-    
-        # Save path
-        self.checkpoint_path = checkpoint_path
-        self.model_path = model_path
-        self.state_dataset_path = state_dataset_path 
 
-        
-        
-        if self.train_dataset_path != None:
-            self.train_dataset = DataLoader(dataset=CustomDataset(self.train_dataset_path, 
-                                                                  "train", 
-                                                                  self.tokenizer, 
-                                                                  inputs_columns=self.choosen_columns[0], 
-                                                                  instruction_columns=self.choosen_columns[1], 
-                                                                  labels_columns=self.choosen_columns[2]),
-                                            batch_size=self.batch_size,
-                                            shuffle=self.shuffle,
-                                            num_workers=self.num_workers,
-                                            collate_fn=self.collate_fn,
-                                            pin_memory=self.pin_memory,
-                                            drop_last=self.drop_last,
-                                            timeout=self.timeout,
-                                            pin_memory_device=self.pin_memory_device)
-                                            
-                                            
-        if self.valid_dataset_path != None:
-            self.valid_dataset = DataLoader(dataset=CustomDataset(self.valid_dataset_path, 
-                                                                  "valid", 
-                                                                  self.tokenizer, 
-                                                                  inputs_columns=self.choosen_columns[0], 
-                                                                  instruction_columns=self.choosen_columns[1], 
-                                                                  labels_columns=self.choosen_columns[2]),
-                                            batch_size=self.batch_size,
-                                            shuffle=self.shuffle,
-                                            num_workers=self.num_workers,
-                                            collate_fn=self.collate_fn,
-                                            pin_memory=self.pin_memory,
-                                            drop_last=self.drop_last,
-                                            timeout=self.timeout,
-                                            pin_memory_device=self.pin_memory_device)
-        
-    def check_break(self, is_training, trained, time_load):
-        if is_training == True and trained == False:
-            if time_load - self.get_time_now() > self.limit_time_train:
-                print("Training process was break.")
-                return True
-        return False
-            
-    def check_being_trained(self, is_training, trained, time_load):
-        if is_training == True and trained == False:
-            if time_load - self.get_time_now() < self.limit_time_train:
-                print("Another account is training this dataset.")
-                return True
-        return False
-    
-    def get_time_now(self):
-        return datetime.datetime.now()
-    def train(self):
-        # ======================================================================
-        # Step by step training
-        # 1 - Load_dataset_state: 
-        # 1.1 - Kiểm tra có account nào đang train không. Nếu không thì chuyển sang bước 1.2. Nếu có thì break cả file train.py này để chuyển sang dataset mới.
-        # 1.2 - Kiểm tra xem giai đoạn train trên dataset đó có bị break không. Nếu có chuyển sang bước 1.2.1. Nếu không thì qua bước 2.
-        # 1.2.1 - Load các thông số (break_correspond_model, break_correspond_optimizer, break_best_accuracy, break_correspond_loss, break_correspond_epoch, break_correspond_timestamp) và lưu vào các biến trong trainer class. Và bắt đầu bước 2.
-        # 2 - Chạy hàm train. Train và validate xong thì chuyển sang bước 3.
-        # 3 - Lưu kết quả
-        # 3.1 - Mở file lưu mô hình cũ. Nếu có cải tiến về độ chính xác thì lưu lại.
-        # 3.2 - Mở file lưu trạng thái dataset. Nếu có cải tiến thì lưu các giá trị lại. Chú ý, với từng mô hình thì sẽ có file trạng thái riêng cho từng dataset.
-        is_training, trained, time_load, break_correspond_model, break_correspond_optimizer, break_best_accuracy, break_correspond_loss, break_correspond_epoch, break_correspond_timestamp = self.load_state_dataset()
-        if self.check_being_trained(is_training, trained, time_load)==False:
-            return False
-        else:
-            if self.check_break(is_training, trained, time_load)==False:
-                self.load_state_dataset()
-        
-        self.train_process()
-        
-        self.save_model()
-        self.save_dataset_state()
-        
-    def train_process(self):
-        # Define your scaler for loss scaling
-        scaler = GradScaler()
-    
-        for epoch in range(self.correspond_epoch, self.num_epochs, 1):
-            # Training
-            # Make sure gradient tracking is on, and do a pass over the data
-            self.model.train(True)
-            avg_loss = self.training_step(scaler)
-            
-            # Set the model to evaluation mode, disabling dropout and using population 
-            # statistics for batch normalization.
-            self.model.eval()
-            avg_vloss = self.validation_step()
-            
-            print('LOSS train {}, valid {}'.format(avg_loss, avg_vloss))
-            
-            # Track best performance, and save the model's state
-            if avg_vloss < self.best_vloss:
-                self.best_vloss = avg_vloss
-                self.best_weights = copy.deepcopy(self.model.state_dict())
-                self.save_checkpoint(epoch=epoch)
-                
-            if not torch.cuda.is_available():
-                self.save_checkpoint(epoch=epoch)
-        
-        # restore model and return best accuracy
-        self.model.load_state_dict(self.best_weights)
-        return self.best_vloss
-    def training_step(self, scaler):
-        for data in tqdm(self.train_dataset, desc=f'Epoch train {self.cur_epoch}/{self.num_epochs}', initial=0, dynamic_ncols=True):
+        # The loss is set to nn.CrossEntropyLoss() by default
+        self.loss = loss if loss else nn.CrossEntropyLoss()
+
+        # The optimizer is set to AdamW by default
+        self.optimizer = optimizer if optimizer else AdamW(
+            self.model.parameters(), lr=kwargs.get('learning_rate', 1e-5)
+        )
+
+        # --- Training args ---
+        self.batch_size = None
+        self.epochs = None
+
+        # --- Checkpoint args ---
+        self.checkpoint_directory = None
+
+        # --- Callbacks args ---
+        # The callbacks variable will be set in fit method
+        self.callbacks: list[BaseCallback] = []
+
+        # Define histories which includes train_loss and valid_loss
+        self.histories = {
+            'train_loss': [],
+            'valid_loss': []
+        }
+
+        # --- Utils options args ---
+        # If the training time reach the time_limit, the training process will be stopped
+        # By default, the time_limit is set to None, which unlimit the training time
+        self.time_limit = time_limit
+
+        # Define device
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
+
+        # Define best valid loss for tracking best model
+        self.best_valid_loss = 1e6
+
+        # Define some default kwargs
+        self.next_checkpoint_name_id = 1
+        self.kwargs = kwargs
+
+    def __before_training(self):
+        """
+        (private) Before training phase.
+        --------------------------------
+        This function will be called before `__training()`.
+        By default, this function will call `on_train_begin()` method from every callbacks.
+        """
+        for callback in self.callbacks:
+            callback.on_train_begin(self)
+
+    def __before_epoch_training(self):
+        """
+        (private) Before epoch training phase.
+        --------------------------------------
+        This function will be called before `__training_step()`.
+        By default, this function will call `on_epoch_begin()` method from every callbacks.
+        """
+        for callback in self.callbacks:
+            callback.on_epoch_begin(self)
+
+    def __after_training(self):
+        """
+        (private) After training phase.
+        -------------------------------
+        This function will be called after `__training()`.
+        By default, this function will call `on_train_end()` method from every callbacks.
+        """
+        for callback in self.callbacks:
+            callback.on_train_end(self)
+
+    def __after_epoch_training(self):
+        """
+        (private) After epoch training phase.
+        -------------------------------------
+        This function will be called after `__training_step()`.
+        By default, this function will call `on_epoch_end()` method from every callbacks.
+        """
+        for callback in self.callbacks:
+            callback.on_epoch_end(self)
+
+    def __training_step(self, epoch, scaler):
+        """
+        (private) Training step.
+        ------------------------
+        The steps are:
+        1. Iterate over training data.
+        2. Zero your gradients for every batch.
+        3. Enable autocasting for forward pass.
+        4. Perform backward pass and optimization using scaler.
+        """
+        logger_message = f'Training epoch {epoch}/{self.epochs}'
+        avg_train_loss = torch.Tensor([0]).to(self.device)
+
+        progress_bar = tqdm(enumerate(self.train_generator),
+                            desc=logger_message, initial=0, dynamic_ncols=True)
+        for _, data in progress_bar:
+            # Destructuring data
             input_ids, attention_mask, token_type_ids, labels = data
-            input_ids, attention_mask, token_type_ids, labels = input_ids.to(self.device), attention_mask.to(self.device), token_type_ids.to(self.device), labels.to(self.device)
-                    
-            # Zero your gradients for every batch!
+            # Cast to device
+            input_ids, attention_mask, token_type_ids, labels = cast_to_device(
+                input_ids, attention_mask, token_type_ids, labels, device=self.device
+            )
+
+            # Zero your gradients for every batch
             self.optimizer.zero_grad(set_to_none=True)
+
             # Enable autocasting for forward pass
             with autocast():
-                y_preds = self.model(inputs, prompts)
-                loss = self.loss_fn(y_preds, labels)
-                        
+                preds = self.model(input_ids, attention_mask, token_type_ids)
+                loss = self.loss(preds, labels)
+                avg_train_loss += loss
+
             # Perform backward pass and optimization using scaler
             scaler.scale(loss).backward()
             scaler.step(self.optimizer)
             scaler.update()
-    
-    def validation_step(self):
-        self.model.eval()
-        running_vloss = 0.0
-        # Disable gradient computation and reduce memory consumption.
-        with torch.no_grad():
-            for i, vdata in tqdm(enumerate(self.valid_dataset), desc=f'Epoch valid {self.cur_epoch}/{self.num_epochs}', initial=0, dynamic_ncols=True):
-                inputs, prompts, labels = vdata
-                    
-                inputs, prompts, labels = inputs.to(self.device), prompts.to(self.device), labels.to(self.device)
-                            
-                with autocast():
-                    y_preds = self.model(inputs, prompts)
-                    vloss = self.loss_fn(y_preds, labels)
-                    running_vloss += vloss
-                                    
-                avg_vloss = running_vloss / (i + 1)
-            return avg_vloss
-        
-    def load_model(self):
-        # Opening JSON file
-        with open(self.model_path, 'r') as openfile:
-            # Reading from json file
-            json_object = json.load(openfile)
-            return json_object["model"], json_object["optimizer"], json_object["best_accuracy"], json_object["correspond_loss"], json_object["correspond_epoch"], json_object["correspond_dataset"], json_object["correspond_timestamp"]
-    
-    def save_checkpoint(self, epoch):
-        # Data to be written
-        dictionary = {
-            "model": self.model.__class__.__name__ ,
-            "accuracy": self.best_accuracy,
-            "loss": self.best_vloss,
-            "epoch": epoch,
-            "timestamp": self.get_time_now()
-        }
-        # Serializing json
-        json_object = json.dumps(dictionary, indent=4)
-        
-        # Writing to sample.json
-        with open(self.checkpoint_path + "_" +str(self.model.__class__.__name__) + "_" + str(self.get_time_now()) + "_" + str(self.cur_epoch) + ".json", "w") as outfile:
-            outfile.write(json_object)
-            
-    def save_model(self):
-        # Đầu tiên là load lên cái thông số cũ.
-        old_model, old_optimizer, old_best_accuracy, old_correspond_loss, old_correspond_epoch, old_correspond_dataset, old_correspond_timestamp = self.load_model()
-        # Kiểm tra nếu độ chính xác của mô hình cải thiện thì mới lưu lại
-        if old_best_accuracy < self.best_accuracy:
-            dictionary = {
-            "model": self.model.__class__.__name__ ,
-            "optimizer": self.optimizer,
-            "accuracy": self.best_accuracy,
-            "loss": self.best_vloss,
-            "epoch": self.correspond_epoch,
-            "dataset": self.valid_dataset_path,
-            "timestamp": self.get_time_now()
-            }
-            # Serializing json
-            json_object = json.dumps(dictionary, indent=4)
-            
-            # Writing to sample.json
-            with open(self.model_path, "w") as outfile:
-                outfile.write(json_object)
-                
-    def load_state_dataset(self):
-        is_training, trained, time_load, break_correspond_model, break_correspond_optimizer, break_best_accuracy, break_best_vloss, break_correspond_epoch, break_correspond_timestamp = self.load_state_dataset()
-        # ========================================================================
-        # Có một cái hàm assert, nhưng mà quên cú pháp rồi
-        # ========================================================================
 
-        self.cur_epoch = break_correspond_epoch
-        self.model = break_correspond_model
-        self.best_accuracy = break_best_accuracy
-        self.best_vloss = break_best_vloss
-        self.optimizer = break_correspond_optimizer
-        self.correspond_timestamp = break_correspond_timestamp
-    def change_state_dataset(self, is_training, trained):
-        with open(self.model_path, 'r') as openfile:
-            # Reading from json file
-            json_object = json.load(openfile)
-            # Xác nhận là dataset này đã được load để train
-            json_object["is_training"] = is_training
-            # Xác nhận là model này chưa train xong dataset này.
-            json_object["trained"] = trained
-            # Xác nhận thời gian gần nhất mà dataset được load
-            json_object["timestamp"] = self.get_time_now()
-            
-        # Writing to sample.json
-        with open(self.model_path, "w") as outfile:
-            outfile.write(json_object)
+            # Update progress bar
+            progress_bar.set_description(
+                f'{logger_message} | Loss: {loss.item():.4f}')
+
+        return avg_train_loss / len(self.train_generator)
+
+    def __validation_step(self, epoch):
+        """
+        (private) Validation step.
+        --------------------------
+        The steps are:
+        1. Iterate over validation data.
+        2. Disable gradient calculation for foward pass.
+        """
+        avg_valid_loss = torch.Tensor([0]).to(self.device)
+        with torch.no_grad():
+            for _, data in tqdm(enumerate(self.valid_generator), desc=f'Validating epoch {epoch}/{self.epochs}', initial=0, dynamic_ncols=True):
+                # Destructuring data
+                input_ids, attention_mask, token_type_ids, labels = data
+                # Cast to device
+                input_ids, attention_mask, token_type_ids, labels = cast_to_device(
+                    input_ids, attention_mask, token_type_ids, labels, device=self.device
+                )
+
+                preds = self.model(
+                    input_ids, attention_mask, token_type_ids)
+                loss = self.loss(preds, labels)
+                avg_valid_loss += loss
+
+        return avg_valid_loss / len(self.valid_generator)
+
+    def __save_checkpoint(self, epoch, checkpoint_name: str = None):
+        """
+        (private) Save checkpoint.
+        --------------------------
+        The checkpoint will be saved in `checkpoint_directory` with name `checkpoint_name`.
+        If `checkpoint_name` is None, the checkpoint will be saved with name `next_checkpoint_name_id + epoch`.
+        """
+        if self.checkpoint_directory is not None:
+            if checkpoint_name is None:
+                checkpoint_name = f'{self.next_checkpoint_name_id + epoch}{CHECKPOINT_EXTENSION}'
+            path = os.path.join(self.checkpoint_directory, checkpoint_name)
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'loss_state_dict': self.loss.state_dict(),
+            }, path)
+
+    def __training(self):
+        """
+        (private) Training phase.
+        -------------------------
+        The steps are:
+        1. Define scaler for loss scaling.
+        2. Iterate over training data.
+        3. Call `__before_epoch_training()`.
+        4. Train model.
+        5. Validate model.
+        6. Save every checkpoint.
+        7. Save best checkpoint.
+        8. Call `__after_epoch_training()`.
+        """
+        # Define scaler for loss scaling
+        scaler = GradScaler()
+
+        # Iterate over training data
+        for epoch in range(self.epochs):
+            # Before training
+            self.__before_epoch_training()
+
+            # Training
+            self.model.train(True)
+            avg_train_loss = self.__training_step(epoch, scaler)
+
+            # Validate
+            if self.valid_generator is not None:
+                self.model.eval(True)
+                avg_valid_loss = self.__validation_step(epoch)
+            else:
+                avg_valid_loss = 0
+
+            # Save checkpoint
+            self.__save_checkpoint(epoch)
+
+            # Save best model
+            if self.valid_generator is not None and avg_valid_loss < self.best_valid_loss:
+                self.best_valid_loss = avg_valid_loss
+                self.__save_checkpoint(epoch, f'0{CHECKPOINT_EXTENSION}')
+
+            # Save history
+            self.histories['train_loss'].append(avg_train_loss.item())
+            self.histories['valid_loss'].append(avg_valid_loss.item())
+
+            # After training
+            self.__after_epoch_training()
+
+    def fit(
+        self,
+        train_generator: Dataset,
+        valid_generator: Dataset = None,
+        batch_size: int = None,
+        epochs: int = None,
+        checkpoint_directory: str = None,
+        callbacks: list[BaseCallback] = None,
+        **kwargs
+    ):
+        """
+        Fit model with given data generator.
+        -------------------------------------
+        Args:
+            train_generator (torch.utils.data.Dataset): Training data generator.
+            valid_generator (torch.utils.data.Dataset): Validation data generator.
+            batch_size (int): Batch size.
+            epochs (int): Epochs.
+            checkpoint_directory (str): Directory to save model checkpoints.
+            callbacks (list): List of callbacks to be used.
+
+        Keyword Args:
+            next_checkpoint_name_id (int): Next checkpoint name id. Default: 1.
+
+        The steps are:
+        1. Set arguments.
+        2. Call `__before_training()`.
+        3. Call `__training()`.
+        4. Call `__after_training()`.
+        """
+        # Set arguments
+        self.train_generator = train_generator
+        self.valid_generator = valid_generator
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.checkpoint_directory = checkpoint_directory
+        if callbacks is not None:
+            self.callbacks = callbacks
+
+        # Checker
+        assert self.epochs is not None, "Epochs must be defined."
+
+        # Define some default kwargs
+        self.next_checkpoint_name_id = kwargs.get('next_checkpoint_name_id', 1)
+
+        # Before training
+        self.__before_training()
+
+        # Training
+        self.__training()
+
+        # After training
+        self.__after_training()
+
+    def load_weights(self, checkpoint_path: str):
+        """
+        Load model's weights from checkpoint.
+        -------------------------------------
+        Args:
+            checkpoint_path (str): Path to checkpoint.
+        """
+        checkpoint = torch.load(checkpoint_path)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.loss.load_state_dict(checkpoint['loss_state_dict'])
