@@ -3,6 +3,7 @@ Training module. This file contains the Trainer class which used to train the mo
 """
 
 import os
+import time
 import torch
 from torch import nn
 from torch.utils.data import Dataset
@@ -103,6 +104,7 @@ class Trainer:
         # If the training time reach the time_limit, the training process will be stopped
         # By default, the time_limit is set to None, which unlimit the training time
         self.time_limit = time_limit
+        self.training_start_time = 0
 
         # Define device
         self.device = torch.device(
@@ -113,6 +115,7 @@ class Trainer:
 
         # Define some default kwargs
         self.next_checkpoint_name_id = 1
+        self.middleware_preds = None
         self.kwargs = kwargs
 
     def __before_training(self):
@@ -184,6 +187,11 @@ class Trainer:
             # Enable autocasting for forward pass
             with autocast():
                 preds = self.model(input_ids, attention_mask, token_type_ids)
+
+                # Middleware injection
+                if self.middleware_preds is not None:
+                    preds = self.middleware_preds(self, preds)
+
                 loss = self.loss(preds, labels)
                 avg_train_loss += loss
 
@@ -218,6 +226,11 @@ class Trainer:
 
                 preds = self.model(
                     input_ids, attention_mask, token_type_ids)
+
+                # Middleware injection
+                if self.middleware_preds is not None:
+                    preds = self.middleware_preds(self, preds)
+
                 loss = self.loss(preds, labels)
                 avg_valid_loss += loss
 
@@ -260,6 +273,10 @@ class Trainer:
 
         # Iterate over training data
         for epoch in range(self.epochs):
+            # Break if time limit reached
+            if self.time_limit is not None and time.time() - self.training_start_time > self.time_limit:
+                break
+
             # Before training
             self.__before_epoch_training()
 
@@ -312,6 +329,7 @@ class Trainer:
 
         Keyword Args:
             next_checkpoint_name_id (int): Next checkpoint name id. Default: 1.
+            middleware_preds (function): Preprocessing prediction function. Default: None.
 
         The steps are:
         1. Set arguments.
@@ -333,11 +351,13 @@ class Trainer:
 
         # Define some default kwargs
         self.next_checkpoint_name_id = kwargs.get('next_checkpoint_name_id', 1)
+        self.middleware_preds = kwargs.get('middleware_preds', None)
 
         # Before training
         self.__before_training()
 
         # Training
+        self.training_start_time = time.time()
         self.__training()
 
         # After training
