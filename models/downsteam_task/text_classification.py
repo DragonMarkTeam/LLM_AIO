@@ -3,9 +3,9 @@ import torch
 from torch import nn
 import collections
 
-class TextClassifier(nn.Module):
+class TextClassifierHead(nn.Module):
     def __init__(self, input_dim, num_labels):
-        super(TextClassifier, self).__init__()
+        super(TextClassifierHead, self).__init__()
         self.transform = torch.nn.Sequential(
             collections.OrderedDict(
                 [

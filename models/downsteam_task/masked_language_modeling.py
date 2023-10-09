@@ -2,9 +2,9 @@ import torch
 from torch import nn
 import collections
 
-class MaskedLanguageModeling(nn.Module):
+class MaskedLanguageModelingHead(nn.Module):
     def __init__(self, input_dim, num_labels):
-        super(MaskedLanguageModeling, self).__init__()
+        super(MaskedLanguageModelingHead, self).__init__()
         self.transform = torch.nn.Sequential(
             collections.OrderedDict(
                 [

@@ -2,9 +2,9 @@ import torch
 from torch import nn
 import collections
 
-class NextSentencePrediction(nn.Module):
+class NextSentencePredictionHead(nn.Module):
     def __init__(self, input_dim, num_labels):
-        super(NextSentencePrediction, self).__init__()
+        super(NextSentencePredictionHead, self).__init__()
         self.pooler = torch.nn.Sequential(
             collections.OrderedDict(
                 [
