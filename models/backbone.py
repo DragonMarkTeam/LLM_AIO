@@ -10,18 +10,22 @@ from models.downsteam_task.translation import *
 from models.downsteam_task.question_answering import *
 
 class Backbone(nn.Module):
-    def __init__(self, model, pretrain_model):
+    def __init__(self, model, task, input_dim):
         #  Mô hình cải tiến của chúng ta
-        self.model = Fine_tuning_model(
-            
-        self.text_classification_model = 
-        self.summarization_model = 
-        self.language_modeling_model = 
-        self.multiple_choice_model = 
-        self.token_classification_model = 
-        self.translation_model = 
-        self.question_answering_model = 
+        self.model = model
+        self.multiple_choice_model = MultipleChoice(input_dim=input_dim)
+        self.token_classification_model = TokenClassification(input_dim=input_dim)
+        self.question_answering_model = QuestionAnswering(input_dim=input_dim)
+        
+        if task == "multiple_choice":
+            self.downsteam = self.multiple_choice_model
+        elif task == "token_classification":
+            self.downsteam = self.token_classification_model
+        elif task == "question_answering":
+            self.downsteam = self.question_answering_model
         
         
-    def forward(self, x):
-        
+    def forward(self, input_ids, mask):
+        _x = self.model(input_ids, mask)
+        _x = self.downsteam(_x)
+        return _x
