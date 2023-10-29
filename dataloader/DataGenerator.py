@@ -21,7 +21,7 @@ class DataGenerator(torch.nn.Module):
         elif type == "next_token_predict":
         self.dataset = Dataset.from_dict(self.next_token_tokenize_function(self.next_token_load_dataframe(list_path)))
     def train_test_split(self, test_size):
-        return self.dataset.train_test_split(test_size=0.1).values()
+        return self.dataset.train_test_split(test_size=test_size).values()
     def multiple_choice_load_dataframe(self, multiple_choice_list_path):
         for i in range(len(multiple_choice_list_path)):
         temp_dataset = pd.read_csv(multiple_choice_list_path[i])
