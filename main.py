@@ -12,7 +12,7 @@ from models.fine_tuning_model import *
 from models.backbone import *
 from train.config import *
 from train.train import *
-from dataloader.dataset import *
+from dataloader.DataGenerator import *
 # ======================================================================
 # ======================================================================
 # ======================================================================
@@ -31,27 +31,19 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained("vinai/phobert-base-v2")
     
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=kwargs.get('learning_rate', 1e-5))
+    optimizer = optim.Adam(model.parameters(), lr=kwargs.get('learning_rate', 1e-5))    
+
+    train = Trainer(model,
+                    loss=loss_fn,
+                    optimizer=optimizer,
+                    time_limit=time_limit
+                    )
     
-    train_generator = DataLoader(DataGenerator(data_path=kwargs.get('learning_rate', 1e-5),
-                                               split="train",
-                                               tokenizer=tokenizer,
-                                               inputs_columns=kwargs.get('learning_rate', 1e-5),
-                                               instruction_columns=kwargs.get('learning_rate', 1e-5),
-                                               labels_columns=kwargs.get('learning_rate', 1e-5)))
-    valid_generator = DataLoader(DataGenerator(data_path=kwargs.get('learning_rate', 1e-5),
-                                               split="test",
-                                               tokenizer=tokenizer,
-                                               inputs_columns=kwargs.get('learning_rate', 1e-5),
-                                               instruction_columns=kwargs.get('learning_rate', 1e-5),
-                                               labels_columns=kwargs.get('learning_rate', 1e-5)))
-    
-    train = Trainer(train_generator,
-        valid_generator,
-        batch_size=kwargs.get('batch_size', 32),
-        epochs=kwargs.get('epochs', 100),
-        checkpoint_directory=kwargs.get('checkpoint_directory', ""),
-        callbacks=kwargs.get('callbacks', None),
-        **kwargs)
-    
-    train()
+    train.fit(multi_choice_data_path,
+            next_token_predict_data_path,
+            batch_size=kwargs.get('batch_size', 32),
+            epochs=kwargs.get('epochs', 100),
+            checkpoint_directory=kwargs.get('checkpoint_directory', ""),
+            context_length=kwargs.get('context_length', 128")
+            callbacks=kwargs.get('callbacks', None),
+            **kwargs)

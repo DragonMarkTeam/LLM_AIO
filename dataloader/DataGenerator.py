@@ -11,73 +11,55 @@ import csv
 import pandas as pd
 
 
-class DataGenerator(Dataset):
-    """
-    Data Generator
-    """
-
-    def __init__(self, dataset_name, tokenizer, split, root_path):
+class DataGenerator(torch.nn.Module):
+    def __init__(self, list_path, type, tokenizer, context_length):
         super(DataGenerator, self).__init__()
-        self.dataset_name = dataset_name
         self.tokenizer = tokenizer
-
-        dataset_path = os.path.join(os.path.join(os.path.join(root_path, dataset_name), split), dataset_name+".csv")
-        dataset = self.__load__(dataset_path)
-        self.dataset = self.__retrieve_columns__(dataset)
-
-    def __load__(self, dataset_path):
-        df = pd.read_csv(dataset_path)
-        return df
-    def __retrieve_columns__(self, df):
-        if self.dataset_name == "CulturaX":
-            self.columns = ["text"]
-            df = Dataset.from_pandas(df)
-            tokenized_datasets = df.map(
-                self.__tokenize__, batched=True, remove_columns=self.columns
-            )
-            return tokenized_datasets
-        elif self.dataset_name == "ai2_arc_vi":
-            self.columns = ["question", "choices", "answerKey"]
-            df = Dataset.from_pandas(df)
-            tokenized_datasets = df.map(
-                self.__tokenize__, batched=True, remove_columns=self.columns
-            )
-            return tokenized_datasets
-        elif self.dataset_name == "arithmetic_vi":
-            self.columns = ["context", "completion"]
-            df = Dataset.from_pandas(df)
-            tokenized_datasets = df.map(
-                self.__tokenize__, batched=True, remove_columns=self.columns
-            )
-        elif self.dataset_name == "grade_12_exams":
-            self.columns = ["question", "choices", "answerKey"]
-            df = Dataset.from_pandas(df)
-            tokenized_datasets = df.map(
-                self.__tokenize__, batched=True, remove_columns=self.columns
-            )
-        elif self.dataset_name == "truthful_qa":
-            self.columns = ["question", "mc1_targets"]
-            df = Dataset.from_pandas(df)
-            tokenized_datasets = df.map(
-                self.__tokenize__, batched=True, remove_columns=self.columns
-            )
-        elif self.dataset_name == "truthful_qa_multi_label":
-            self.columns = ["question", "mc2_targets"]
-            df = Dataset.from_pandas(df)
-            tokenized_datasets = df.map(
-                self.__tokenize__, batched=True, remove_columns=self.columns
-            )
-        return df[self.columns]
-    def __tokenize__(batch):
-        outputs = tokenizer(
-            batch['text'],
-            truncation=True,
-            max_length=context_length,
-            return_overflowing_tokens=True,
-            return_length=True,
-            padding='max_length'
-        )
-        return outputs[['input_ids', 'token_type_ids', 'length', 'attention_mask']]
+        self.context_length = context_length
+        if type == "multiple_choice":
+        self.dataset = Dataset.from_dict(self.multiple_choice_tokenize_function(self.multiple_choice_load_dataframe(list_path)))
+        elif type == "next_token_predict":
+        self.dataset = Dataset.from_dict(self.next_token_tokenize_function(self.next_token_load_dataframe(list_path)))
+    def train_test_split(self, test_size):
+        return self.dataset.train_test_split(test_size=0.1).values()
+    def multiple_choice_load_dataframe(self, multiple_choice_list_path):
+        for i in range(len(multiple_choice_list_path)):
+        temp_dataset = pd.read_csv(multiple_choice_list_path[i])
+        if i == 0:
+            dataset = temp_dataset
+        else:
+            dataset = pd.concat([dataset, temp_dataset], axis=1)
+        return Dataset.from_pandas(dataset)
+    def next_token_load_dataframe(self, next_token_list_path):
+        for i in range(len(next_token_list_path)):
+        temp_dataset = pd.read_csv(next_token_list_path[i])
+        if i == 0:
+            dataset = temp_dataset
+        else:
+            dataset = pd.concat([dataset, temp_dataset], axis=1)
+        return Dataset.from_pandas(dataset)
+    def multiple_choice_tokenize_function(self, batch):
+        prompt = self.tokenizer(batch['prompt'],
+                                padding='max_length',
+                                truncation=True,
+                                max_length=self.context_length)
+        label = self.tokenizer(batch['label'],
+                                padding='max_length',
+                                truncation=True,
+                                max_length=self.context_length)
+        return {'input_ids': prompt['input_ids'],
+                'attention_mask_prompt': prompt['attention_mask'],
+                'label': label['input_ids'],
+                'attention_mask_label': label['attention_mask']}
+    def next_token_tokenize_function(self, batch):
+        prompt = self.tokenizer(batch['text'],
+                                padding='max_length',
+                                truncation=True,
+                                max_length=self.context_length)
+        return {'input_ids': prompt['input_ids'],
+                'attention_mask_prompt': prompt['attention_mask'],
+                'label': prompt['input_ids'],
+                'attention_mask_label': prompt['attention_mask']}
 
     def __getitem__(self, idx):
         return self.dataset[idx]

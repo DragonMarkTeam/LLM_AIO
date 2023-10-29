@@ -12,6 +12,7 @@ from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 from .callbacks import BaseCallback
 from ..utils.cast_device import cast_to_device
+from ..dataloader.DataGenerator import DataGenerator
 
 
 CHECKPOINT_EXTENSION = '.pt'
@@ -68,8 +69,10 @@ class Trainer:
     ):
         # --- Data inputs args ---
         # The train_generator and valid_generator will be set in fit method
-        self.train_generator = None
-        self.valid_generator = None
+        self.multi_choice_train_generator = None
+        self.multi_choice_valid_generator = None
+        self.next_token_predict_train_generator = None
+        self.next_token_predict_valid_generator = None
 
         # --- Model configs args ---
         # The model variable will be set in fit method
@@ -171,14 +174,23 @@ class Trainer:
         logger_message = f'Training epoch {epoch}/{self.epochs}'
         avg_train_loss = torch.Tensor([0]).to(self.device)
 
-        progress_bar = tqdm(enumerate(self.train_generator),
+        multi_choice_progress_bar = tqdm(self.multi_choice_train_generator,
                             desc=logger_message, initial=0, dynamic_ncols=True)
-        for _, data in progress_bar:
+        next_token_predict_progress_bar = tqdm(self.next_token_predict_train_generator,
+                            desc=logger_message, initial=0, dynamic_ncols=True)
+        for mc_data, ntp_data in zip(multi_choice_progress_bar, next_token_predict_progress_bar):
             # Destructuring data
-            input_ids, attention_mask, token_type_ids, labels = data
+            input_ids, attention_mask_prompt, labels, attention_mask_label = mc_data
             # Cast to device
-            input_ids, attention_mask, token_type_ids, labels = cast_to_device(
-                input_ids, attention_mask, token_type_ids, labels, device=self.device
+            mc_input_ids, mc_attention_mask_prompt, mc_labels, mc_attention_mask_label = cast_to_device(
+                input_ids, attention_mask_prompt, labels, attention_mask_label, device=self.device
+            )
+
+            # Destructuring data
+            input_ids, attention_mask_prompt, labels, attention_mask_label = ntp_data
+            # Cast to device
+            ntp_input_ids, ntp_attention_mask_prompt, ntp_labels, ntp_attention_mask_label = cast_to_device(
+                input_ids, attention_mask_prompt, labels, attention_mask_label, device=self.device
             )
 
             # Zero your gradients for every batch
@@ -186,14 +198,19 @@ class Trainer:
 
             # Enable autocasting for forward pass
             with autocast():
-                preds = self.model(input_ids, attention_mask, token_type_ids)
+                mc_preds = self.mc_model(input_ids, attention_mask_prompt)
+                ntp_preds = self.ntp_model(input_ids, attention_mask_prompt)
 
-                # Middleware injection
-                if self.middleware_preds is not None:
-                    preds = self.middleware_preds(self, preds)
+                # # Middleware injection
+                # if self.middleware_preds is not None:
+                #     preds = self.middleware_preds(self, preds)
 
-                loss = self.loss(preds, labels)
+                ntp_loss = self.loss(ntp_preds, ntp_labels)
+                mc_loss = self.loss(mc_preds, mc_labels)
+                loss = (ntp_loss+mc_loss)/2
                 avg_train_loss += loss
+
+            
 
             # Perform backward pass and optimization using scaler
             scaler.scale(loss).backward()
@@ -218,21 +235,34 @@ class Trainer:
         with torch.no_grad():
             for _, data in tqdm(enumerate(self.valid_generator), desc=f'Validating epoch {epoch}/{self.epochs}', initial=0, dynamic_ncols=True):
                 # Destructuring data
-                input_ids, attention_mask, token_type_ids, labels = data
+                input_ids, attention_mask_prompt, labels, attention_mask_label = mc_data
                 # Cast to device
-                input_ids, attention_mask, token_type_ids, labels = cast_to_device(
-                    input_ids, attention_mask, token_type_ids, labels, device=self.device
+                mc_input_ids, mc_attention_mask_prompt, mc_labels, mc_attention_mask_label = cast_to_device(
+                    input_ids, attention_mask_prompt, labels, attention_mask_label, device=self.device
                 )
 
-                preds = self.model(
-                    input_ids, attention_mask, token_type_ids)
+                # Destructuring data
+                input_ids, attention_mask_prompt, labels, attention_mask_label = ntp_data
+                # Cast to device
+                ntp_input_ids, ntp_attention_mask_prompt, ntp_labels, ntp_attention_mask_label = cast_to_device(
+                    input_ids, attention_mask_prompt, labels, attention_mask_label, device=self.device
+                )
+
+                mc_preds = self.mc_model(input_ids, attention_mask_prompt)
+                ntp_preds = self.ntp_model(input_ids, attention_mask_prompt)
+
+                # Middleware injection
+                # if self.middleware_preds is not None:
+                #     preds = self.middleware_preds(self, preds)
 
                 # Middleware injection
                 if self.middleware_preds is not None:
                     preds = self.middleware_preds(self, preds)
 
-                loss = self.loss(preds, labels)
-                avg_valid_loss += loss
+                ntp_loss = self.loss(ntp_preds, ntp_labels)
+                mc_loss = self.loss(mc_preds, mc_labels)
+                loss = (ntp_loss+mc_loss)/2
+                avg_train_loss += loss
 
         return avg_valid_loss / len(self.valid_generator)
 
@@ -308,10 +338,11 @@ class Trainer:
 
     def fit(
         self,
-        train_generator: Dataset,
-        valid_generator: Dataset = None,
+        multi_choice_data_path,
+        next_tokne_predict_data_path,
         batch_size: int = None,
         epochs: int = None,
+        context_length: int = 128,
         checkpoint_directory: str = None,
         callbacks: list[BaseCallback] = None,
         **kwargs
@@ -337,9 +368,15 @@ class Trainer:
         3. Call `__training()`.
         4. Call `__after_training()`.
         """
+
+        
+        multi_choice_dataset = DataGenerator(multi_choice_data_path, 'multiple_choice', self.tokenizer, context_length)
+        next_token_predict_dataset = DataGenerator(next_token_predict_data_path, 'next_token_predict', self.tokenizer, context_length)
+        
+        self.multi_choice_train_generator, self.multi_choice_valid_generator = multi_choice_dataset.train_test_split(test_size=0.1)
+        self.next_token_predict_train_generator, self.next_token_predict_valid_generator = next_token_predict_dataset.train_test_split(test_size=0.1)
+
         # Set arguments
-        self.train_generator = train_generator
-        self.valid_generator = valid_generator
         self.batch_size = batch_size
         self.epochs = epochs
         self.checkpoint_directory = checkpoint_directory
